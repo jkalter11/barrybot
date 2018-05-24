@@ -1,0 +1,398 @@
+<html>
+<head>
+  <title>Barry</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+  <script src="https://code.responsivevoice.org/responsivevoice.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/annyang/2.6.0/annyang.min.js"></script>
+  <script type="text/javascript">
+    var accessToken = "5080ab2c28204a0a82de12bba8068f82",
+      baseUrl = "https://api.api.ai/v1/",
+      $speechInput,
+      $recBtn,
+      recognition,
+      current_context = "greeting",
+      carMaker,
+      carModel,
+      carEngine,
+      carYear,
+      messageRecording = "Recording...",
+      messageCouldntHear = "I couldn't hear you, could you say that again?",
+      messageInternalError = "Oh no, there has been an internal server error",
+      messageSorry = "I'm sorry, I don't have the answer to that yet.";
+
+    $(document).ready(function() {
+      $('#unsupported').hide();
+      $speechInput = $("#speech");
+      $recBtn = $("#rec");
+
+      $speechInput.focus();
+      $recBtn.text("Stop");
+
+      if (!responsiveVoice.voiceSupport() || !annyang) {
+        // alert("Your browser do not support speech synthesis, use latest Chrome !");
+        $('#unsupported').fadeIn('fast');
+        return;
+      }
+      annyang.start({ paused: true });
+      annyang.addCallback('error', function() {
+        // console.log('annyang error');
+      });
+      annyang.addCallback('errorNetwork', function() {
+        console.log('speech: errorNetwork');
+      });
+      annyang.addCallback('errorPermissionBlocked', function() {
+        console.log('speech: errorPermissionBlocked');
+      });
+      annyang.addCallback('errorPermissionDenied', function() {
+        console.log('speech: errorPermissionDenied');
+      });
+
+//      annyang.addCallback('soundstart', function() {
+//        console.log('annyang soundstart');
+//      });
+
+      annyang.addCallback('result', function(r) {
+        // console.log('annyang result:');
+        // console.log(r);
+        if (r.length >= 1) {
+          stopRec();
+          send(r[0]);
+        }
+      });
+
+      say("Hello, I'm Barry, AI bot, and can quote a car for you. Please tell me car maker and model !",
+        function() {
+          startRec();
+        });
+
+      // responsiveVoice.debug = 0;
+      // var voicelist = responsiveVoice.getVoices();
+      // voicelist.forEach(function(voice) {
+      //   console.log(voice.name);
+      // });
+
+      $speechInput.keypress(function(event) {
+        if (event.which == 13) {
+          event.preventDefault();
+          send($speechInput.val());
+        }
+      });
+
+//      $recBtn.on("click", function(event) {
+//        switchRecognition();
+//      });
+
+      $(".debug__btn").on("click", function() {
+        $(this).next().toggleClass("is-active");
+        return false;
+      });
+    });
+
+    function startRec() {
+      // console.log('start recording..');
+      $recBtn.text("Speak");
+      annyang.resume();
+    }
+
+    function stopRec() {
+      // console.log('stop recording');
+      $recBtn.text("Stop");
+      annyang.pause();
+    }
+
+    function send(text) {
+      if (!text.length)
+        return;
+      $.ajax({
+        type: "POST",
+        url: baseUrl + "query",
+        contentType: "application/json; charset=utf-8",
+        dataType: "json",
+        headers: {
+          "Authorization": "Bearer " + accessToken
+        },
+        data: JSON.stringify({
+          query: text,
+          lang: "en",
+          sessionId: "runbarry",
+          resetContexts: true,
+          contexts: [ {
+                name: current_context,
+                lifespan: 1
+              }
+            ]
+        }),
+
+        success: function(data) {
+          prepareResponse(data);
+          $speechInput.val('');
+        },
+        error: function() {
+          respond(messageInternalError);
+        }
+      });
+    }
+
+    function responseError(result, ctx) {
+      console.log(result);
+      var r = 'Wrong input. Please ';
+      switch (ctx) {
+        case 'greeting':
+          r += 'select Tesla or BMW';
+          break;
+        case 'getBMWModel':
+          r += 'select 3, 5 or 7 series';
+          break;
+        case 'getTeslaModel':
+          r += 'select model S, model 3, model X, 70D, 75/D, 90D or P100D series';
+          break;
+        case 'getTeslaBattery':
+          r += 'select 40, 60, 70, 75, 85, 90 or 100 kWh';
+          break;
+        case 'getBMWEngine':
+          if (result.resolvedQuery.indexOf('1.5') !== -1) {
+              carEngine = '1.5 litres';
+              current_context = 'getCarYear';
+              respond('What the ' + carMaker + ' ' + carModel + ' year ?');
+              return;
+          } else if (result.resolvedQuery.indexOf('2.5') !== -1) {
+              carEngine = '2.5 litres';
+              current_context = 'getCarYear';
+              respond('What the ' + carMaker + ' ' + carModel + ' year ?');
+              return;
+          } else
+              r += 'select 1, 1.5, 2, 2.5 or 3 litres';
+          break;
+        case 'getCarYear':
+          r += 'select 2010-2017 years';
+          break;
+        default:
+        r += 'try again';
+      }
+        respond(r);
+    }
+
+    function prepareResponse(val) {
+      var debugJSON = JSON.stringify(val, undefined, 2),
+        spokenResponse = val.result.speech;
+      var result = val.result;
+      debugRespond(debugJSON);
+      if (result.score == 0)
+        return responseError(result, current_context);
+      switch (result.action) {
+        case 'gotCarYear':
+          carYear = result.parameters.years;
+          if (carYear.indexOf('current') !== -1)
+            carYear = '2017';
+          if (carMaker == 'BMW')
+            say('Ok, you want ' + carMaker + ' ' + carModel + ' ' + carEngine + ' made at ' + carYear + ' year. We have one for $1000 for you.',
+              stopRec);
+          else
+            say('Ok, you want ' + carMaker + ' ' + carModel + ' with ' + carEngine + ' battery made at ' + carYear + ' year. We have one for $1000 for you.',
+              stopRec);
+          break;
+        case 'gotTeslaModel':
+          carModel = result.parameters.Teslamodels;
+          current_context = 'getTeslaBattery';
+          respond('What the ' + carMaker + ' ' + carModel + ' battery do you prefer ?');
+          break;
+        case 'gotBMWModel':
+          carModel = result.parameters.BMWmodels;
+          current_context = 'getBMWEngine';
+          respond('What the ' + carMaker + ' ' + carModel + ' engine size do you prefer ?');
+          break;
+        case 'gotTeslaBattery':
+          carEngine = result.parameters.TeslaBattery + ' kWh';
+          current_context = 'getCarYear';
+          respond('What the ' + carMaker + ' ' + carModel + ' with ' + carEngine + ' battery year ?');
+          break;
+        case 'gotBMWengine':
+          carEngine = result.parameters.engines;
+          carEngine = carEngine.replace(new RegExp('L', 'g'), 'litres');
+          // carEngine.replace(/L/g, 'litres');
+          current_context = 'getCarYear';
+          respond('What the ' + carMaker + ' ' + carModel + ' ' + carEngine + ' year ?');
+          break;
+        case 'gotCarMaker':
+          if (result.parameters.manufacturers.length == 1) {
+            carMaker = result.parameters.manufacturers[0];
+            current_context = getCarModelctx(carMaker);
+            respond('What the ' + carMaker + ' model do you want ?');
+            break;
+          } else if (result.parameters.BMWmodels.length == 1) {
+            carMaker = 'BMW';
+            carModel = result.parameters.BMWmodels[0];
+            current_context = 'getBMWEngine';
+            respond('What the ' + carMaker + ' ' + carModel + ' engine size do you prefer ?');
+            break;
+          } else if (result.parameters.Teslamodels.length == 1) {
+            carMaker = 'Tesla';
+            carModel = result.parameters.Teslamodels[0];
+            current_context = 'getTeslaBattery';
+            respond('What the ' + carMaker + ' ' + carModel + ' battery do you prefer ?');
+            break;
+          }
+        default:
+          respond(spokenResponse);
+      }
+    }
+    function getCarModelctx(val) {
+      switch (val) {
+        case 'BMW':
+          return 'getBMWModel';
+        case 'Tesla':
+          return 'getTeslaModel';
+        default:
+          return 'unknownModel';
+      }
+    }
+
+    function debugRespond(val) {
+      $("#response").text(val);
+    }
+
+    function respond(val) {
+      if (val == "") {
+        val = messageSorry;
+      }
+      $("#spokenResponse").addClass("is-active").find(".spoken-response__text").html(val);
+      if (val !== messageRecording) {
+        // var msg = new SpeechSynthesisUtterance();
+        // msg.voiceURI = "native";
+        // msg.lang = "en-US";
+        // msg.voiceURI = "Google US English";
+        // msg.name = "Google UK English Male";
+        // msg.lang = "en-GB";
+        // msg.voiceURI = "Google UK English Male";
+        // msg.text = val;
+        // window.speechSynthesis.speak(msg);
+        responsiveVoice.speak(val, "US English Male", { onend: startRec });
+      }
+    }
+
+    function say(val, cb) {
+      if (val == "")
+        val = messageSorry;
+      $("#spokenResponse").addClass("is-active").find(".spoken-response__text").html(val);
+      responsiveVoice.speak(val, "US English Male", { onend: cb });
+    }
+
+  </script>
+  <style type="text/css">
+    html {
+      box-sizing: border-box;
+    }
+    *, *:before, *:after {
+      box-sizing: inherit;
+    }
+    body {
+      background-color: #192837;
+      font-family: "Titillium Web", Arial, sans-serif;
+      font-size: 20px;
+      margin: 0;
+    }
+    .container {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      -webkit-transform: translate(-50%, -50%);
+    }
+    input {
+      background-color: #126077;
+      border: 1px solid #3F7F93;
+      color: #A6CAE6;
+      font-family: "Titillium Web";
+      font-size: 20px;
+      line-height: 43px;
+      padding: 0 0.75em;
+      width: 400px;
+      -webkit-transition: all 0.35s ease-in;
+    }
+    textarea {
+      background-color: #070F24;
+      border: 1px solid #122435;
+      color: #606B88;
+      padding: 0.5em;
+      width: 100%;
+      -webkit-transition: all 0.35s ease-in;
+    }
+    input:active, input:focus, textarea:active, textarea:focus {
+      outline: 1px solid #48788B;
+    }
+    .btn {
+      background-color: #126178;
+      border: 1px solid #549EAF;
+      color: #549EAF;
+      cursor: pointer;
+      display: inline-block;
+      font-family: "Titillium Web";
+      font-size: 20px;
+      line-height: 43px;
+      padding: 0 0.75em;
+      text-align: center;
+      text-transform: uppercase;
+      -webkit-transition: all 0.35s ease-in;
+    }
+    .btn:hover {
+      background-color: #1888A9;
+      color: #183035;
+    }
+    .debug {
+      bottom: 0;
+      position: fixed;
+      right: 0;
+    }
+    .debug__content {
+      font-size: 14px;
+      max-height: 0;
+      overflow: hidden;
+      -webkit-transition: all 0.35s ease-in;
+    }
+    .debug__content.is-active {
+      display: block;
+      max-height: 500px;
+    }
+    .debug__btn {
+      width: 100%;
+    }
+    .spoken-response {
+      max-height: 0;
+      overflow: hidden;
+      -webkit-transition: all 0.35s ease-in;
+    }
+    .spoken-response.is-active {
+      max-height: 400px;
+    }
+    .spoken-response__text {
+      background-color: #040E23;
+      color: #7584A2;
+      padding: 1em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <input id="speech" type="text">
+    <button id="rec" class="btn">Speak</button>
+    <div id="spokenResponse" class="spoken-response">
+      <div class="spoken-response__text"></div>
+    </div>
+  </div>
+  <div class="debug">
+    <div class="debug__btn btn">
+      Debug JSON results
+    </div>
+    <div class="debug__content">
+      <textarea id="response" cols="40" rows="20"></textarea>
+    </div>
+  </div>
+  <div id="unsupported" class="hidden">
+    <br><br><center>
+    <h4 style="color:#F00">It looks like your browser doesn't support speech recognition. Use the latest Chrome</h4>
+    </center>
+ </div>
+
+  <link href="https://fonts.googleapis.com/css?family=Titillium+Web:200" rel="stylesheet" type="text/css">
+</body>
+</html>
